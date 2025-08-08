@@ -1,45 +1,47 @@
-from flask import Flask, render_template, request, redirect
-import sqlite3
-from datetime import datetime
+from flask import Flask, render_template, request, redirect, session
+import time
+import difflib
 
 app = Flask(__name__)
+app.secret_key = 'your_secret_key_here'  # Required to use sessions
 
-def init_db():
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS users
-                 (name TEXT, email TEXT, phone TEXT, wpm INTEGER, accuracy REAL, submitted_at TEXT)""")
-    conn.commit()
-    conn.close()
+TYPING_PROMPT = "The quick brown fox jumps over the lazy dog."
 
-@app.route('/')
+@app.route("/", methods=['GET', 'POST'])
 def index():
-    return render_template('index.html')
+    if request.method == 'POST':
+        session['name'] = request.form['name']
+        session['email'] = request.form['email']
+        session['phone'] = request.form['phone']
+        return redirect("/test")
+    return render_template("index.html")
 
-@app.route('/start', methods=['POST'])
-def start():
-    name = request.form['name']
-    email = request.form['email']
-    phone = request.form['phone']
-    return render_template('test.html', name=name, email=email, phone=phone)
+@app.route("/test", methods=['GET'])
+def test():
+    session['start_time'] = time.time()
+    return render_template("test.html", prompt=TYPING_PROMPT, start_time=session['start_time'])
 
-@app.route('/submit', methods=['POST'])
-def submit():
-    name = request.form['name']
-    email = request.form['email']
-    phone = request.form['phone']
-    wpm = int(request.form['wpm'])
-    accuracy = float(request.form['accuracy'])
-    now = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+@app.route("/result", methods=['POST'])
+def result():
+    end_time = time.time()
+    start_time = float(request.form['start_time'])
+    typed_text = request.form['typed_text']
+    original_text = request.form['prompt']
+    time_taken = end_time - start_time
 
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", (name, email, phone, wpm, accuracy, now))
-    conn.commit()
-    conn.close()
+    # Calculate Words Per Minute (WPM)
+    word_count = len(typed_text.split())
+    minutes = time_taken / 60
+    wpm = round(word_count / minutes, 2) if minutes > 0 else 0
 
-    return render_template('result.html', name=name, wpm=wpm, accuracy=accuracy)
+    # Calculate accuracy
+    matcher = difflib.SequenceMatcher(None, original_text, typed_text)
+    accuracy = round(matcher.ratio() * 100, 2)
+
+    return render_template("result.html", wpm=wpm, accuracy=accuracy,
+                           name=session.get('name'),
+                           email=session.get('email'),
+                           phone=session.get('phone'))
 
 if __name__ == '__main__':
-    init_db()
-    app.run(host='0.0.0.0', port=8080)
+    app.run(debug=True)
